@@ -35,6 +35,9 @@ function App() {
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
+const [needsPasswordSetup, setNeedsPasswordSetup] = useState(false);
+const [newPassword, setNewPassword] = useState("");
+const [confirmPassword, setConfirmPassword] = useState("");
 const [profile, setProfile] = useState<{
   id: string;
   full_name: string;
@@ -75,10 +78,17 @@ const loadProfile = async (userId: string) => {
   setSession(data.session);
 
   if (data.session?.user) {
-    await loadProfile(data.session.user.id);
-  } else {
-    setProfile(null);
-  }
+  const user = data.session.user;
+
+  setNeedsPasswordSetup(
+    user.user_metadata?.password_setup_required === true
+  );
+
+  await loadProfile(user.id);
+} else {
+  setProfile(null);
+  setNeedsPasswordSetup(false);
+}
 
   setAuthLoading(false);
 });
@@ -119,10 +129,49 @@ const loadProfile = async (userId: string) => {
       email: email.trim(),
       password
     });
-
-    if (error) setAuthError(error.message);
+if (error) setAuthError(error.message);
     setAuthBusy(false);
   }
+async function handlePasswordSetup(e: React.FormEvent) {
+  e.preventDefault();
+
+  if (!supabase) {
+    setAuthError("Supabase is not configured.");
+    return;
+  }
+
+  if (newPassword.length < 8) {
+    setAuthError("Password must be at least 8 characters.");
+    return;
+  }
+
+  if (newPassword !== confirmPassword) {
+    setAuthError("Passwords do not match.");
+    return;
+  }
+
+  setAuthBusy(true);
+  setAuthError("");
+
+  const { error } = await supabase.auth.updateUser({
+    password: newPassword,
+    data: {
+      password_setup_required: false,
+    },
+  });
+
+  if (error) {
+    setAuthError(error.message);
+    setAuthBusy(false);
+    return;
+  }
+
+  setNewPassword("");
+  setConfirmPassword("");
+  setNeedsPasswordSetup(false);
+  setAuthBusy(false);
+}
+    
 
   async function handleLogout() {
     if (supabase) await supabase.auth.signOut();
@@ -338,19 +387,193 @@ useEffect(() => {
   }
 }, [currentRole, page]);
   if (authLoading) {
-    return (
-      <div style={{
-        minHeight: "100vh", display: "grid", placeItems: "center",
-        background: "#f4f6fb", color: "#172033", fontFamily: "Inter, Arial, sans-serif"
-      }}>
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 48, marginBottom: 12 }}>🐾</div>
-          <h2 style={{ margin: 0 }}>Starting Meow...</h2>
-          <p style={{ color: "#718096" }}>Checking your secure session.</p>
-        </div>
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        display: "grid",
+        placeItems: "center",
+        background: "#f4f6fb",
+        color: "#172033",
+        fontFamily: "Inter, Arial, sans-serif",
+      }}
+    >
+      <div style={{ textAlign: "center" }}>
+        <img
+          src="/meow-logo.png"
+          alt="Meow Edits"
+          style={{
+            width: 150,
+            height: "auto",
+            objectFit: "contain",
+            marginBottom: 18,
+          }}
+        />
+
+        <h2 style={{ margin: 0 }}>Starting Meow...</h2>
+
+        <p style={{ color: "#718096" }}>
+          Checking your secure session.
+        </p>
       </div>
-    );
-  }
+    </div>
+  );
+}
+if (session && needsPasswordSetup) {
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        display: "grid",
+        placeItems: "center",
+        background: "linear-gradient(135deg,#eef2f7,#f8fafc)",
+        fontFamily: "Inter, Arial, sans-serif",
+        padding: 24,
+      }}
+    >
+      <form
+        onSubmit={handlePasswordSetup}
+        style={{
+          width: "100%",
+          maxWidth: 420,
+          background: "#fff",
+          borderRadius: 24,
+          padding: 32,
+          boxShadow: "0 24px 70px rgba(15,23,42,.14)",
+        }}
+      >
+        <img
+          src="/meow-logo.png"
+          alt="Meow Edits"
+          style={{
+            width: 150,
+            height: "auto",
+            objectFit: "contain",
+            marginBottom: 18,
+          }}
+        />
+
+        <div
+          style={{
+            color: "#718096",
+            fontSize: 12,
+            letterSpacing: 2,
+            fontWeight: 700,
+          }}
+        >
+          XPERIA NIGERIA
+        </div>
+
+        <h1
+          style={{
+            margin: "6px 0 8px",
+            color: "#172033",
+          }}
+        >
+          Welcome to Meow
+        </h1>
+
+        <p
+          style={{
+            margin: "0 0 24px",
+            color: "#718096",
+          }}
+        >
+          Your staff account is ready. Create your own password to continue.
+        </p>
+
+        <label
+          style={{
+            display: "block",
+            marginBottom: 16,
+            color: "#526079",
+          }}
+        >
+          New password
+          <input
+            type="password"
+            required
+            minLength={8}
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            placeholder="Create your password"
+            style={{
+              width: "100%",
+              boxSizing: "border-box",
+              marginTop: 7,
+              padding: "13px 14px",
+              border: "1px solid #d9e0ea",
+              borderRadius: 12,
+              fontSize: 15,
+              outline: "none",
+            }}
+          />
+        </label>
+
+        <label
+          style={{
+            display: "block",
+            marginBottom: 16,
+            color: "#526079",
+          }}
+        >
+          Confirm password
+          <input
+            type="password"
+            required
+            minLength={8}
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            placeholder="Confirm your password"
+            style={{
+              width: "100%",
+              boxSizing: "border-box",
+              marginTop: 7,
+              padding: "13px 14px",
+              border: "1px solid #d9e0ea",
+              borderRadius: 12,
+              fontSize: 15,
+              outline: "none",
+            }}
+          />
+        </label>
+
+        {authError && (
+          <div
+            style={{
+              marginBottom: 16,
+              padding: 12,
+              borderRadius: 10,
+              background: "#fff1f2",
+              color: "#c53030",
+              fontSize: 14,
+            }}
+          >
+            {authError}
+          </div>
+        )}
+
+        <button
+          type="submit"
+          disabled={authBusy}
+          style={{
+            width: "100%",
+            padding: "14px 16px",
+            border: "none",
+            borderRadius: 12,
+            background: "#111a2c",
+            color: "#fff",
+            fontSize: 16,
+            fontWeight: 700,
+            cursor: authBusy ? "wait" : "pointer",
+          }}
+        >
+          {authBusy ? "Saving password..." : "Create Password"}
+        </button>
+      </form>
+    </div>
+  );
+}
 
   if (!supabase || !session) {
     return (
@@ -363,11 +586,16 @@ useEffect(() => {
           width: "100%", maxWidth: 420, background: "#fff", borderRadius: 24,
           padding: 32, boxShadow: "0 24px 70px rgba(15,23,42,.14)"
         }}>
-          <div style={{
-            width: 58, height: 58, borderRadius: 16, display: "grid",
-            placeItems: "center", background: "#111a2c", color: "#fff",
-            fontSize: 28, marginBottom: 18
-          }}>🐾</div>
+          <img
+  src="/meow-logo.png"
+  alt="Meow Edits"
+  style={{
+    width: 150,
+    height: "auto",
+    objectFit: "contain",
+    marginBottom: 18,
+  }}
+/>
           <div style={{ color: "#718096", fontSize: 12, letterSpacing: 2, fontWeight: 700 }}>
             XPERIA NIGERIA
           </div>
