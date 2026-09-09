@@ -3892,7 +3892,7 @@ const inviteStaff = async () => {
         }
 
         const { data, error } =
-          await supabase.functions.invoke("Delete-staff", {
+          await supabase.functions.invoke("Delete-Staff", {
             body: {
               user_id: editingStaff.id,
             },
