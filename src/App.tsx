@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import Barcode from "react-barcode";
+import { BrowserMultiFormatReader } from "@zxing/browser";
 import {
   BarChart3, Bell, Boxes, ChevronRight, CircleDollarSign, FileText,
   Home, LogOut, Menu, PackagePlus, Receipt, Search, Settings, ShieldCheck,
@@ -233,6 +234,9 @@ useEffect(() => {
   const [receipt, setReceipt] = useState<{
   receiptNumber: string;
   items: CartItem[];
+  subtotal: number;
+  discount: number;
+  vat: number;
   total: number;
   paymentMethod?: string;
   amountPaid?: number;
@@ -718,7 +722,14 @@ if (session && needsPasswordSetup) {
 
       {!isSupabaseConfigured && <div className="config-banner"><ShieldCheck size={18}/><div><b>Demo mode</b><span>Add your Supabase URL and anon key to <code>.env</code> to connect live data.</span></div></div>}
 
-      {page==="Dashboard" && <Dashboard products={products} money={money} onPOS={()=>setPage("Point of Sale")} />}
+      {page === "Dashboard" && (
+  <Dashboard
+    products={products}
+    money={money}
+    onPOS={() => setPage("Point of Sale")}
+    profile={profile}
+  />
+)}
       {page==="Point of Sale" && <POS products={filtered} query={query} setQuery={setQuery} category={category} setCategory={setCategory} add={add} cart={cart} adjust={adjust} total={cartTotal} count={cartCount} checkout={()=>setShowCheckout(true)} money={money}/>}
       {page==="Inventory" && <Inventory
   products={products}
@@ -744,7 +755,13 @@ onDelete={removeProduct}
   MEOW EDITS · Xperia Nigeria <span></span>{isSupabaseConfigured?"Connected":"Demo mode"}</footer>
     </main>
 
-    {showCheckout && <Checkout total={cartTotal} cart={cart} money={money} close={()=>setShowCheckout(false)} complete={async (paymentMethod, amountPaid) => {
+    {showCheckout && <Checkout total={cartTotal} cart={cart} money={money} close={()=>setShowCheckout(false)} complete={async (
+  paymentMethod,
+  amountPaid,
+  discount,
+  vat,
+  finalTotal
+) => {
   if (!supabase) {
     notify("Supabase is not configured.");
     return;
@@ -770,11 +787,11 @@ onDelete={removeProduct}
         receipt_number: receiptNumber,
         cashier_id: user?.id ?? null,
         subtotal: cartTotal,
-        discount: 0,
-        total: cartTotal,
-        payment_method: paymentMethod,
+discount: discount,
+total: finalTotal,
+payment_method: paymentMethod,
 amount_paid: amountPaid,
-change_due: Math.max(0, amountPaid - cartTotal),
+change_due: Math.max(0, amountPaid - finalTotal),
         notes: null
       })
       .select("id")
@@ -820,10 +837,13 @@ if (stockError) throw stockError;
       })
     );
 
-    setReceipt({
+   setReceipt({
   receiptNumber,
   items: cart,
-  total: cartTotal,
+  subtotal: cartTotal,
+  discount,
+  vat,
+  total: finalTotal,
   paymentMethod,
   amountPaid
 });
@@ -977,7 +997,40 @@ setCart([]);
         <span>TOTAL</span>
         <span>{money(receipt.total)}</span>
       </div>
+<div
+  style={{
+    display: "flex",
+    justifyContent: "space-between",
+    marginTop: "10px",
+  }}
+>
+  <span>Subtotal</span>
+  <span>{money(receipt.subtotal)}</span>
+</div>
 
+{receipt.discount > 0 && (
+  <div
+    style={{
+      display: "flex",
+      justifyContent: "space-between",
+      marginTop: "8px",
+    }}
+  >
+    <span>Discount (2%)</span>
+    <span>-{money(receipt.discount)}</span>
+  </div>
+)}
+
+<div
+  style={{
+    display: "flex",
+    justifyContent: "space-between",
+    marginTop: "8px",
+  }}
+>
+  <span>VAT (7.5%)</span>
+  <span>{money(receipt.vat)}</span>
+</div>
       <div className="modal-actions">
         <button
           className="ghost"
@@ -1000,7 +1053,17 @@ setCart([]);
   </div>
 }
 
-function Dashboard({products,money,onPOS}:{products:Product[];money:(n:number)=>string;onPOS:()=>void}) {
+function Dashboard({
+  products,
+  money,
+  onPOS,
+  profile,
+}: {
+  products: Product[];
+  money: (n: number) => string;
+  onPOS: () => void;
+  profile: { full_name: string } | null;
+}) {
   const [todaySales, setTodaySales] = useState(0);
 const [todayTransactions, setTodayTransactions] = useState(0);
 const [weeklySales, setWeeklySales] = useState<number[]>([
@@ -1049,7 +1112,9 @@ useEffect(() => {
   p => p.stock <= (p.low_stock_threshold ?? 5)
 ).length;
   return <section className="content">
-    <div className="welcome"><div><span className="pill">TODAY</span><h2>Good day, Meow Admin 👋</h2><p>Here's what's happening in your shop.</p></div><button className="primary" onClick={onPOS}><ShoppingCart size={18}/> Open POS</button></div>
+    <div className="welcome"><div><span className="pill">TODAY</span><h2>
+  Good day, {profile?.full_name || "Meow Admin"} 👋
+</h2><p>Here's what's happening in your shop.</p></div><button className="primary" onClick={onPOS}><ShoppingCart size={18}/> Open POS</button></div>
     <div className="stats">
       <Stat icon={CircleDollarSign} label="Today's sales" value={money(todaySales)} change="+12.8%" />
       <Stat icon={Receipt} label="Transactions" value={todayTransactions.toString()} change="+4 today" />
@@ -1233,42 +1298,54 @@ body {
 .label-content {
   width: 25.4mm;
   height: 38.1mm;
-  padding: 1.5mm;
+  margin: 0;
+  padding: 1.5mm 2mm;
+  box-sizing: border-box;
+
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  text-align: center;
- position: relative;
-  left: 2mm;
-  top: -3mm;
-  transform: rotate(-90deg);
-  transform-origin: center;
-}
-.brand {
-  font-size: 6px;
-  font-weight: 700;
-  margin-bottom: 0.5mm;
-}
 
-.product {
-  font-size: 7px;
+  text-align: center;
+
+  position: absolute;
+  left: 50%;
+  top: 35%;
+
+  transform: translate(-50%, -50%) rotate(-90deg);
+}.brand {
+  font-size: 8px;
   font-weight: 700;
-  margin-bottom: 0.5mm;
-}
-.category {
-  font-size: 7px;
+  line-height: 1.1;
   margin-bottom: 1mm;
 }
 
-.sku {
+.product {
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.1;
+  margin-bottom: 0.5mm;
+}
+
+.category {
   font-size: 7px;
-  margin-top: 0.5mm;
+  line-height: 1;
+  margin-bottom: 1mm;
+}
+
+#barcode {
+  display: block;
+  width: 34mm;
+  height: auto;
+  margin: 0 auto;
 }
 
 .price {
-  font-size: 9px;
-  margin-top: 1mm;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+  margin-top: 0.5mm;
 }
 
         @media print {
@@ -1319,11 +1396,13 @@ body {
         window.onload = function () {
           JsBarcode("#barcode", "${product.sku}", {
   format: "CODE128",
-  width: 0.8,
-  height: 13,
+  width: 2,
+  height: 45,
   displayValue: true,
-  fontSize: 6,
-  margin: 1
+  fontSize: 9,
+  margin: 4,
+  marginTop: 3,
+  marginBottom: 3
 });
 
           setTimeout(function () {
@@ -1722,8 +1801,12 @@ const [uploadingImage, setUploadingImage] = useState(false);
 
 function Sales({money}:{money:(n:number)=>string}) {
   const [sales, setSales] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+const [loading, setLoading] = useState(true);
+const [error, setError] = useState("");
+const [selectedSale, setSelectedSale] = useState<any | null>(null);
+const [saleItems, setSaleItems] = useState<any[]>([]);
+const [itemsLoading, setItemsLoading] = useState(false);
+const [salesSearch, setSalesSearch] = useState("");
 
   useEffect(() => {
     async function loadSales() {
@@ -1765,8 +1848,58 @@ function Sales({money}:{money:(n:number)=>string}) {
 
     loadSales();
   }, []);
+async function openReceipt(sale: any) {
+  if (!supabase) return;
+
+  setSelectedSale(sale);
+  setSaleItems([]);
+  setItemsLoading(true);
+
+  const { data, error } = await supabase
+    .from("sale_items")
+    .select(`
+      quantity,
+      unit_price,
+      products (
+        name,
+        sku,
+        categories (
+          name
+        )
+      )
+    `)
+    .eq("sale_id", sale.id);
+
+ if (error) {
+  console.error("Receipt items error:", error);
+  setError(`Could not load receipt details: ${error.message}`);
+} else {
+  setSaleItems(data ?? []);
+}
+
+  setItemsLoading(false);
+}
+
+const filteredSales = sales.filter((sale) => {
+  const search = salesSearch.trim().toLowerCase();
+
+  if (!search) return true;
+
+  const receipt = String(sale.receipt_number ?? "").toLowerCase();
+  const cashier = String(
+    sale.profiles?.full_name ?? ""
+  ).toLowerCase();
+  const payment = String(
+    sale.payment_method ?? ""
+  ).toLowerCase();
 
   return (
+    receipt.includes(search) ||
+    cashier.includes(search) ||
+    payment.includes(search)
+  );
+});  
+return (
     <section className="content">
       <div className="page-head">
         <div>
@@ -1780,6 +1913,31 @@ function Sales({money}:{money:(n:number)=>string}) {
       </div>
 
       <div className="table-panel">
+<div
+  style={{
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "16px 20px",
+    borderBottom: "1px solid #edf0f5",
+  }}
+>
+  <Search size={17} />
+
+  <input
+    value={salesSearch}
+    onChange={(e) => setSalesSearch(e.target.value)}
+    placeholder="Search receipt, cashier or payment..."
+    style={{
+      width: "100%",
+      border: "none",
+      outline: "none",
+      background: "transparent",
+      fontSize: 14,
+      color: "#172033",
+    }}
+  />
+</div>
         {loading ? (
           <div style={{padding: 30, textAlign: "center"}}>
             Loading sales...
@@ -1811,11 +1969,23 @@ function Sales({money}:{money:(n:number)=>string}) {
             </thead>
 
             <tbody>
-              {sales.map(sale => (
+              {filteredSales.map(sale => (
                 <tr key={sale.id}>
                   <td>
-                    <b>{sale.receipt_number}</b>
-                  </td>
+  <button
+    className="ghost"
+    onClick={() => openReceipt(sale)}
+    style={{
+      padding: 0,
+      border: "none",
+      background: "transparent",
+      fontWeight: 700,
+      cursor: "pointer",
+    }}
+  >
+    {sale.receipt_number}
+  </button>
+</td>
 
                   <td>
                     {new Date(sale.created_at).toLocaleString()}
@@ -1844,6 +2014,569 @@ function Sales({money}:{money:(n:number)=>string}) {
           </table>
         )}
       </div>
+{selectedSale && (
+  <div
+    style={{
+      position: "fixed",
+      inset: 0,
+      background: "rgba(15, 23, 42, 0.45)",
+      display: "grid",
+      placeItems: "center",
+      padding: 20,
+      zIndex: 1000,
+    }}
+    onClick={() => setSelectedSale(null)}
+  >
+    <div
+      style={{
+        width: "100%",
+        maxWidth: 520,
+        maxHeight: "90vh",
+        overflowY: "auto",
+        background: "#fff",
+        borderRadius: 20,
+        padding: 28,
+        boxShadow: "0 24px 70px rgba(15,23,42,.25)",
+      }}
+      onClick={e => e.stopPropagation()}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          marginBottom: 24,
+        }}
+      >
+        <div>
+          <div
+            style={{
+              fontSize: 12,
+              letterSpacing: 2,
+              fontWeight: 700,
+              color: "#718096",
+            }}
+          >
+            MEOW EDITS
+          </div>
+
+          <h2 style={{ margin: "6px 0" }}>Receipt</h2>
+
+          <b>{selectedSale.receipt_number}</b>
+        </div>
+
+        <div style={{ display: "flex", gap: 10 }}>
+  <button
+    className="primary"
+    onClick={() => {
+      const printWindow = window.open("", "_blank", "width=420,height=700");
+
+      if (!printWindow) {
+        setError("Could not open the print window. Please allow pop-ups.");
+        return;
+      }
+
+      const itemsHtml = saleItems
+        .map((item) => {
+          const product = Array.isArray(item.products)
+            ? item.products[0]
+            : item.products;
+
+          const quantity = Number(item.quantity) || 0;
+          const unitPrice = Number(item.unit_price) || 0;
+          const lineTotal = quantity * unitPrice;
+
+          return `
+            <tr>
+              <td>
+                ${product?.name || "Unknown product"}
+                <br>
+                <small>${quantity} × ${money(unitPrice)}</small>
+              </td>
+              <td style="text-align:right;">
+                ${money(lineTotal)}
+              </td>
+            </tr>
+          `;
+        })
+        .join("");
+
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>${selectedSale.receipt_number}</title>
+
+<style>
+  @page {
+    size: 80mm auto;
+    margin: 0;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 80mm !important;
+    background: #fff;
+    color: #172033;
+    font-family: Arial, Helvetica, sans-serif;
+  }
+
+  body {
+    font-size: 12px;
+  }
+
+  .receipt {
+    width: 80mm !important;
+    max-width: 80mm !important;
+    margin: 0 !important;
+    padding: 4mm !important;
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .brand {
+    text-align: center;
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: 2px;
+    margin-bottom: 2px;
+  }
+
+  .company {
+    text-align: center;
+    font-size: 10px;
+    margin-bottom: 4mm;
+  }
+
+  .receipt-number {
+    text-align: center;
+    font-size: 12px;
+    font-weight: 700;
+    margin-bottom: 2px;
+  }
+
+  .date {
+    text-align: center;
+    font-size: 10px;
+    margin-bottom: 3mm;
+  }
+
+  .meta {
+    border-top: 1px solid #222;
+    border-bottom: 1px solid #222;
+    padding: 2mm 0;
+    margin-bottom: 3mm;
+  }
+
+  .meta-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    margin: 1mm 0;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  tr {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  td {
+    padding: 2mm 0;
+    vertical-align: top;
+    border-bottom: 1px dashed #aaa;
+  }
+
+  td:last-child {
+    text-align: right;
+    white-space: nowrap;
+    font-weight: 700;
+  }
+
+  small {
+    font-size: 9px;
+  }
+
+  .total {
+    display: flex;
+    justify-content: space-between;
+    border-top: 2px solid #172033;
+    margin-top: 3mm;
+    padding-top: 3mm;
+    font-size: 17px;
+    font-weight: 800;
+  }
+
+  .payment {
+    margin-top: 3mm;
+  }
+
+  .payment-row {
+    display: flex;
+    justify-content: space-between;
+    margin: 1.5mm 0;
+  }
+
+  .thanks {
+    text-align: center;
+    margin-top: 5mm;
+    font-size: 10px;
+  }
+
+  @media print {
+    html,
+    body {
+      width: 80mm !important;
+      margin: 0 !important;
+      padding: 0 !important;
+    }
+
+    .receipt {
+      width: 80mm !important;
+      max-width: 80mm !important;
+      margin: 0 !important;
+      padding: 4mm !important;
+    }
+  }
+</style>
+        </head>
+
+        <body>
+          <div class="receipt">
+
+            <div class="brand">MEOW EDITS</div>
+            <div class="company">XPERIA NIGERIA</div>
+
+            <div class="receipt-number">
+              ${selectedSale.receipt_number}
+            </div>
+
+            <div class="date">
+              ${new Date(selectedSale.created_at).toLocaleString()}
+            </div>
+
+            <div class="meta">
+              <div class="meta-row">
+                <span>Cashier</span>
+                <strong>
+                  ${selectedSale.profiles?.full_name || "Unknown"}
+                </strong>
+              </div>
+
+              <div class="meta-row">
+                <span>Payment</span>
+                <strong>
+                  ${selectedSale.payment_method || "—"}
+                </strong>
+              </div>
+
+              <div class="meta-row">
+                <span>Status</span>
+                <strong>Completed</strong>
+              </div>
+            </div>
+
+            <table>
+              <tbody>
+                ${itemsHtml}
+              </tbody>
+            </table>
+
+            <div style="margin-top: 10px;">
+
+  <div style="
+    display:flex;
+    justify-content:space-between;
+    margin:6px 0;
+  ">
+    <span>Subtotal</span>
+    <span>
+      ${money(Number(selectedSale.subtotal) || 0)}
+    </span>
+  </div>
+
+  ${
+    Number(selectedSale.discount) > 0
+      ? `
+        <div style="
+          display:flex;
+          justify-content:space-between;
+          margin:6px 0;
+        ">
+          <span>Discount (2%)</span>
+          <span>
+            -${money(Number(selectedSale.discount) || 0)}
+          </span>
+        </div>
+      `
+      : ""
+  }
+
+  <div style="
+    display:flex;
+    justify-content:space-between;
+    margin:6px 0;
+  ">
+    <span>VAT (7.5%)</span>
+    <span>
+      ${money(
+        Math.max(
+          0,
+          Number(selectedSale.total || 0) -
+            (
+              Number(selectedSale.subtotal || 0) -
+              Number(selectedSale.discount || 0)
+            )
+        )
+      )}
+    </span>
+  </div>
+
+</div>
+
+<div class="total">
+  <span>TOTAL</span>
+  <span>
+    ${money(Number(selectedSale.total) || 0)}
+  </span>
+</div>
+
+            <div class="payment">
+
+              <div class="payment-row">
+                <span>Amount paid</span>
+                <strong>
+                  ${money(Number(selectedSale.amount_paid) || 0)}
+                </strong>
+              </div>
+
+              <div class="payment-row">
+                <span>Change</span>
+                <strong>
+                  ${money(Number(selectedSale.change_due) || 0)}
+                </strong>
+              </div>
+
+            </div>
+
+            <div class="thanks">
+              Thank you for shopping with Meow Edits.
+            </div>
+
+          </div>
+
+          <script>
+            window.onload = function () {
+              setTimeout(function () {
+                window.print();
+              }, 300);
+            };
+          </script>
+
+        </body>
+        </html>
+      `);
+
+      printWindow.document.close();
+    }}
+  >
+    🖨️ Reprint
+  </button>
+
+  <button
+    className="ghost"
+    onClick={() => setSelectedSale(null)}
+  >
+    Close
+  </button>
+</div>
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 12,
+          marginBottom: 24,
+        }}
+      >
+        <div>
+          <small>Date</small>
+          <div>
+            {new Date(selectedSale.created_at).toLocaleString()}
+          </div>
+        </div>
+
+        <div>
+          <small>Cashier</small>
+          <div>
+            {selectedSale.profiles?.full_name || "Unknown"}
+          </div>
+        </div>
+
+        <div>
+          <small>Payment</small>
+          <div>
+            {selectedSale.payment_method || "—"}
+          </div>
+        </div>
+
+        <div>
+          <small>Status</small>
+          <div>
+            <span className="status">Completed</span>
+          </div>
+        </div>
+      </div>
+
+      <hr />
+
+      <h3 style={{ marginTop: 20 }}>Items</h3>
+
+      {itemsLoading ? (
+        <div style={{ padding: 20, textAlign: "center" }}>
+          Loading receipt...
+        </div>
+      ) : saleItems.length === 0 ? (
+        <div style={{ padding: 20, textAlign: "center" }}>
+          No items found for this receipt.
+        </div>
+      ) : (
+        <div>
+          {saleItems.map((item, index) => {
+            const product = Array.isArray(item.products)
+              ? item.products[0]
+              : item.products;
+
+            const lineTotal =
+              Number(item.quantity || 0) *
+              Number(item.unit_price || 0);
+
+            return (
+              <div
+                key={index}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  padding: "12px 0",
+                  borderBottom: "1px solid #edf0f5",
+                }}
+              >
+                <div>
+                  <b>{product?.name || "Unknown product"}</b>
+
+                  <div style={{ fontSize: 12, color: "#718096" }}>
+                    {item.quantity} ×{" "}
+                    {money(Number(item.unit_price) || 0)}
+                  </div>
+                </div>
+
+                <b>{money(lineTotal)}</b>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div style={{ marginTop: 16 }}>
+  <div
+    style={{
+      display: "flex",
+      justifyContent: "space-between",
+    }}
+  >
+    <span>Subtotal</span>
+    <span>
+      {money(Number(selectedSale.subtotal) || 0)}
+    </span>
+  </div>
+
+  {Number(selectedSale.discount) > 0 && (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        marginTop: 8,
+        color: "#b42318",
+      }}
+    >
+      <span>Discount (2%)</span>
+      <span>
+        -{money(Number(selectedSale.discount) || 0)}
+      </span>
+    </div>
+  )}
+
+  <div
+    style={{
+      display: "flex",
+      justifyContent: "space-between",
+      marginTop: 8,
+    }}
+  >
+    <span>VAT (7.5%)</span>
+    <span>
+      {money(
+        Math.max(
+          0,
+          Number(selectedSale.total || 0) -
+            (
+              Number(selectedSale.subtotal || 0) -
+              Number(selectedSale.discount || 0)
+            )
+        )
+      )}
+    </span>
+  </div>
+</div>
+
+<div
+  style={{
+    display: "flex",
+    justifyContent: "space-between",
+    fontSize: 20,
+    fontWeight: 800,
+    padding: "18px 0",
+  }}
+>
+  <span>TOTAL</span>
+  <span>{money(Number(selectedSale.total) || 0)}</span>
+</div>
+
+      {selectedSale.amount_paid != null && (
+        <div style={{ marginTop: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span>Amount paid</span>
+            <b>{money(Number(selectedSale.amount_paid) || 0)}</b>
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              marginTop: 8,
+            }}
+          >
+            <span>Change</span>
+            <b>{money(Number(selectedSale.change_due) || 0)}</b>
+          </div>
+        </div>
+      )}
+    </div>
+  </div>
+)}
     </section>
   );
 }
@@ -3117,22 +3850,102 @@ const inviteStaff = async () => {
               </select>
             </label>
 
-            <div className="modal-actions">
-              <button
-                className="ghost"
-                onClick={() => setEditingStaff(null)}
-              >
-                Cancel
-              </button>
+            <div
+  className="modal-actions"
+  style={{
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 20,
+  }}
+>
+  <button
+    type="button"
+    className="ghost"
+    style={{
+      color: "#b42318",
+      borderColor: "#f1b5b5",
+    }}
+    disabled={
+      staffSaving ||
+      editingStaff.role === "owner"
+    }
+    onClick={async () => {
+      if (!editingStaff) return;
 
-              <button
-                className="primary"
-                disabled={staffSaving}
-                onClick={saveStaffEdit}
-              >
-                {staffSaving ? "Saving..." : "Save changes"}
-              </button>
-            </div>
+      if (editingStaff.role === "owner") {
+        notify("The owner account cannot be deleted.");
+        return;
+      }
+
+      const confirmed = window.confirm(
+        `Delete ${editingStaff.full_name || "this staff member"}?\n\nThis will remove their Meow access. This action cannot be undone.`
+      );
+
+      if (!confirmed) return;
+
+      setStaffSaving(true);
+
+      try {
+        if (!supabase) {
+          throw new Error("Supabase is not configured.");
+        }
+
+        const { data, error } =
+          await supabase.functions.invoke("Delete-staff", {
+            body: {
+              user_id: editingStaff.id,
+            },
+          });
+
+        if (error) throw error;
+
+        if (data?.error) {
+          throw new Error(data.error);
+        }
+
+        setStaff((current) =>
+          current.filter(
+            (person) => person.id !== editingStaff.id
+          )
+        );
+
+        setEditingStaff(null);
+
+        notify("Staff member deleted successfully.");
+      } catch (error: any) {
+        console.error("Delete staff error:", error);
+        notify(
+          error?.message ||
+          "Could not delete staff member."
+        );
+      } finally {
+        setStaffSaving(false);
+      }
+    }}
+  >
+    Delete staff
+  </button>
+
+  <div style={{ display: "flex", gap: 10 }}>
+    <button
+      type="button"
+      className="ghost"
+      onClick={() => setEditingStaff(null)}
+    >
+      Cancel
+    </button>
+
+    <button
+      type="button"
+      className="primary"
+      disabled={staffSaving}
+      onClick={saveStaffEdit}
+    >
+      {staffSaving ? "Saving..." : "Save changes"}
+    </button>
+  </div>
+</div>
           </div>
         </div>
       )}
@@ -3140,58 +3953,224 @@ const inviteStaff = async () => {
   );
 }
 
-function Checkout({total,cart,money,close,complete}:{total:number;cart:CartItem[];money:(n:number)=>string;close:()=>void;complete:(method:string, amountPaid:number)=>void}) {
- const [method,setMethod]=useState("pos"); const [paid,setPaid]=useState(total.toString()); const amount=Number(paid)||0;
- return <div className="modal-backdrop"><div className="modal"><div className="modal-head"><div><span className="pill">CHECKOUT</span><h2>Complete sale</h2></div><button className="icon-btn" onClick={close}><X/></button></div><div className="checkout-total"><span>Total due</span><strong>{money(total)}</strong></div><div className="pay-methods"><div className="pay-methods">
+function Checkout({
+  total,
+  cart,
+  money,
+  close,
+  complete,
+}: {
+  total: number;
+  cart: CartItem[];
+  money: (n: number) => string;
+  close: () => void;
+  complete: (
+    method: string,
+    amountPaid: number,
+    discount: number,
+    vat: number,
+    finalTotal: number
+  ) => void;
+}) {
+  const [method, setMethod] = useState("pos");
+  const [discountEnabled, setDiscountEnabled] = useState(false);
 
-  <button
-    className={`method ${method === "pos" ? "selected" : ""}`}
-    onClick={() => setMethod("pos")}
-  >
-    <CreditCard size={18} />
-    <span>POS</span>
-  </button>
+  const discountRate = 0.02;
+  const vatRate = 0.075;
 
-  <button
-    className={`method ${method === "cash" ? "selected" : ""}`}
-    onClick={() => setMethod("cash")}
-  >
-    <Banknote size={18} />
-    <span>Cash</span>
-  </button>
+  const discount = discountEnabled
+    ? total * discountRate
+    : 0;
 
-  <button
-    className={`method ${method === "transfer" ? "selected" : ""}`}
-    onClick={() => setMethod("transfer")}
-  >
-    <Smartphone size={18} />
-    <span>Transfer</span>
-  </button>
+  const taxableAmount = total - discount;
+  const vat = taxableAmount * vatRate;
+  const finalTotal = taxableAmount + vat;
 
-</div></div><label>Amount received<input value={paid} onChange={e=>setPaid(e.target.value)} inputMode="numeric"/></label><div className="change"><span>Change due</span><b>{money(Math.max(0,amount-total))}</b></div><div
-  className="modal-actions"
-  style={{
-    display: "flex",
-    justifyContent: "flex-end",
-    gap: "10px",
-    marginTop: "18px",
-    width: "100%",
-  }}
->
-  <button className="ghost" onClick={close}>
-    Cancel
-  </button>
+  const [paid, setPaid] = useState(finalTotal.toFixed(2));
 
-  <button
-    className="primary"
-    disabled={amount < total}
-    onClick={() => complete(method, amount)}
-  >
-    Complete sale <Receipt size={17} />
-  </button>
-</div>
-</div>
-</div>
+  const amount = Number(paid) || 0;
+  const change = Math.max(0, amount - finalTotal);
+
+  return (
+    <div className="modal-backdrop">
+      <div className="modal">
+
+        <div className="modal-head">
+          <div>
+            <span className="pill">CHECKOUT</span>
+            <h2>Complete sale</h2>
+          </div>
+
+          <button className="icon-btn" onClick={close}>
+            <X />
+          </button>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gap: "10px",
+            marginBottom: "18px",
+          }}
+        >
+
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+            }}
+          >
+            <span>Subtotal</span>
+            <strong>{money(total)}</strong>
+          </div>
+
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              cursor: "pointer",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={discountEnabled}
+              onChange={(e) =>
+                setDiscountEnabled(e.target.checked)
+              }
+              style={{
+                width: "18px",
+                height: "18px",
+              }}
+            />
+
+            <span>
+              Apply 2% discount
+            </span>
+          </label>
+
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              color: discount > 0 ? "#b42318" : undefined,
+            }}
+          >
+            <span>Discount (2%)</span>
+            <strong>
+              {discount > 0
+                ? `-${money(discount)}`
+                : money(0)}
+            </strong>
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+            }}
+          >
+            <span>VAT (7.5%)</span>
+            <strong>{money(vat)}</strong>
+          </div>
+
+          <div
+            className="checkout-total"
+            style={{
+              marginTop: "6px",
+            }}
+          >
+            <span>Total due</span>
+            <strong>{money(finalTotal)}</strong>
+          </div>
+
+        </div>
+
+        <div className="pay-methods">
+
+          <button
+            className={`method ${
+              method === "pos" ? "selected" : ""
+            }`}
+            onClick={() => setMethod("pos")}
+          >
+            <CreditCard size={18} />
+            <span>POS</span>
+          </button>
+
+          <button
+            className={`method ${
+              method === "cash" ? "selected" : ""
+            }`}
+            onClick={() => setMethod("cash")}
+          >
+            <Banknote size={18} />
+            <span>Cash</span>
+          </button>
+
+          <button
+            className={`method ${
+              method === "transfer" ? "selected" : ""
+            }`}
+            onClick={() => setMethod("transfer")}
+          >
+            <Smartphone size={18} />
+            <span>Transfer</span>
+          </button>
+
+        </div>
+
+        <label>
+          Amount received
+
+          <input
+            value={paid}
+            onChange={(e) => setPaid(e.target.value)}
+            inputMode="decimal"
+          />
+        </label>
+
+        <div className="change">
+          <span>Change due</span>
+          <b>{money(change)}</b>
+        </div>
+
+        <div
+          className="modal-actions"
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: "10px",
+            marginTop: "18px",
+            width: "100%",
+          }}
+        >
+
+          <button className="ghost" onClick={close}>
+            Cancel
+          </button>
+
+          <button
+            className="primary"
+            disabled={amount < finalTotal}
+            onClick={() =>
+              complete(
+                method,
+                amount,
+                discount,
+                vat,
+                finalTotal
+              )
+            }
+          >
+            Complete sale <Receipt size={17} />
+          </button>
+
+        </div>
+
+      </div>
+    </div>
+  );
 }
 
 export default App;

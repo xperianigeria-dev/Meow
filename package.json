@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.0",
+    "@zxing/browser": "^0.2.1",
     "lucide-react": "^0.468.0",
     "react": "^19.1.1",
     "react-barcode": "^1.6.1",
